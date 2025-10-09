@@ -12,11 +12,8 @@ from datetime import datetime
 
 import requests
 
-from data_providers import (
-    MarineTrafficApiProvider,
-    SampleDataProvider,
-    VesselDataProvider,
-)
+from data_providers import MarineTrafficApiProvider, SampleDataProvider, VesselDataProvider
+from data_providers.utils import cache_ttl_minutes, load_cached_payload, store_cached_payload
 
 
 class MarineTrafficClient:
@@ -59,7 +56,11 @@ class MarineTrafficClient:
 
     def get_vessels_in_port_area(self, port_name: str, radius: int = 50) -> List[Dict]:
         """
-        Recupera i vettori nell'area di un porto
+        Recupera i vettori nell'area di un porto.
+
+        I risultati vengono memorizzati in cache per ridurre le chiamate ripetute
+        verso lo stesso provider; in caso di errore vengono riutilizzati gli ultimi
+        dati validi disponibili prima di ricorrere al provider simulato.
 
         Args:
             port_name: Nome del porto
@@ -79,10 +80,28 @@ class MarineTrafficClient:
             providers_chain.append(self._api_provider)
 
         last_error: Optional[Exception] = None
+        attempted_providers: List[str] = []
+        ttl_minutes = cache_ttl_minutes()
 
         for provider in providers_chain:
+            provider_name = getattr(provider, "provider_name", provider.__class__.__name__).lower()
+            attempted_providers.append(provider_name)
+
+            if provider_name != "simulated":
+                cached = load_cached_payload(
+                    provider_name,
+                    port_name,
+                    radius,
+                    max_age_minutes=ttl_minutes,
+                )
+                if cached:
+                    return cached.get("vessels", [])
+
             try:
-                return provider.fetch_vessels(port_name, radius)
+                vessels = provider.fetch_vessels(port_name, radius)
+                if provider_name != "simulated":
+                    store_cached_payload(provider_name, port_name, radius, vessels)
+                return vessels
             except Exception as exc:
                 last_error = exc
                 print(
@@ -91,6 +110,22 @@ class MarineTrafficClient:
                 )
 
         if last_error:
+            for provider_name in attempted_providers:
+                if provider_name == "simulated":
+                    continue
+                cached = load_cached_payload(
+                    provider_name,
+                    port_name,
+                    radius,
+                    max_age_minutes=None,
+                )
+                if cached:
+                    print(
+                        "Info: utilizzo dati memorizzati in cache per "
+                        f"{provider_name}"
+                    )
+                    return cached.get("vessels", [])
+
             print("Info: utilizzo dati simulati come fallback")
 
         try:

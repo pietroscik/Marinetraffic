@@ -11,14 +11,8 @@ from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 
-from data_providers import (
-    AisHubApiProvider,
-    MarineTrafficApiProvider,
-    OpenAisApiProvider,
-    OpenAisFileProvider,
-    SampleDataProvider,
-    VesselDataProvider,
-)
+from data_providers import SampleDataProvider, VesselDataProvider, provider_registry
+from data_providers.utils import parse_env_mapping
 from marine_traffic_client import MarineTrafficClient
 from arrival_predictor import ArrivalPredictor
 from vessel_clustering import VesselClusterer
@@ -60,127 +54,31 @@ class MarineTrafficMonitor:
         self.projection_horizon_hours = projection_horizon_hours
         self.projection_interval_hours = projection_interval_hours
 
-    @staticmethod
-    def _parse_env_mapping(value: Optional[str], env_name: str) -> Optional[Dict[str, str]]:
-        if not value:
-            return None
-
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError as exc:
-            print(f"Warning: variabile {env_name} non è un JSON valido: {exc}")
-            return None
-
-        if isinstance(parsed, dict):
-            return {str(k): str(v) for k, v in parsed.items()}
-
-        print(f"Warning: variabile {env_name} deve essere un oggetto JSON (dizionario)")
-        return None
-
     @classmethod
     def build_data_provider_from_env(cls) -> Optional[VesselDataProvider]:
         """Crea un provider di dati AIS basato sulle variabili d'ambiente."""
+        env = {key: value for key, value in os.environ.items() if value is not None}
+        mode = env.get('DATA_PROVIDER_MODE', '').lower()
 
-        mode = os.getenv('DATA_PROVIDER_MODE', '').lower()
+        provider: Optional[VesselDataProvider] = None
+        if mode:
+            try:
+                provider = provider_registry.create_from_env(mode, env)
+            except KeyError:
+                print(f"Warning: provider configurato '{mode}' non riconosciuto")
+                provider = None
 
-        if mode == 'commercial':
-            api_key = os.getenv('MARINETRAFFIC_API_KEY')
-            if api_key:
-                try:
-                    return MarineTrafficApiProvider(api_key)
-                except Exception as exc:
-                    print(f"Warning: impossibile inizializzare MarineTrafficApiProvider: {exc}")
-        elif mode == 'aishub':
-            username = os.getenv('AIS_HUB_USERNAME', '').strip()
-            if username:
-                api_key = os.getenv('AIS_HUB_API_KEY', '').strip() or None
-                extra_params = cls._parse_env_mapping(
-                    os.getenv('AIS_HUB_EXTRA_PARAMS'),
-                    'AIS_HUB_EXTRA_PARAMS',
-                )
-                output_format = os.getenv('AIS_HUB_OUTPUT', 'json').strip() or 'json'
-                message_format = os.getenv('AIS_HUB_MESSAGE_FORMAT', '1').strip() or '1'
-                compress = os.getenv('AIS_HUB_COMPRESS', '0').lower() in {'1', 'true', 'yes'}
-                try:
-                    return AisHubApiProvider(
-                        username=username,
-                        api_key=api_key,
-                        output_format=output_format,
-                        message_format=message_format,
-                        compress=compress,
-                        extra_params=extra_params,
-                    )
-                except Exception as exc:
-                    print(f"Warning: impossibile inizializzare AisHubApiProvider: {exc}")
-        elif mode == 'open_file':
-            open_data_file = os.getenv('AIS_OPEN_DATA_FILE')
-            if open_data_file:
-                try:
-                    return OpenAisFileProvider(open_data_file)
-                except Exception as exc:
-                    print(f"Warning: impossibile utilizzare AIS_OPEN_DATA_FILE: {exc}")
-        elif mode == 'open_http':
-            open_data_url = os.getenv('AIS_OPEN_DATA_URL')
-            if open_data_url:
-                headers = cls._parse_env_mapping(os.getenv('AIS_OPEN_DATA_HEADERS'), 'AIS_OPEN_DATA_HEADERS')
-                params = cls._parse_env_mapping(os.getenv('AIS_OPEN_DATA_PARAMS'), 'AIS_OPEN_DATA_PARAMS')
-                port_param = os.getenv('AIS_OPEN_DATA_PORT_PARAM')
-                try:
-                    return OpenAisApiProvider(
-                        open_data_url,
-                        headers=headers,
-                        params=params,
-                        port_query_param=port_param,
-                    )
-                except Exception as exc:
-                    print(f"Warning: impossibile utilizzare AIS_OPEN_DATA_URL: {exc}")
-        elif mode == 'simulated':
-            return SampleDataProvider()
-
-        username = os.getenv('AIS_HUB_USERNAME')
-        if username:
-            api_key = os.getenv('AIS_HUB_API_KEY', '').strip() or None
-            extra_params = cls._parse_env_mapping(
-                os.getenv('AIS_HUB_EXTRA_PARAMS'),
-                'AIS_HUB_EXTRA_PARAMS',
+        if provider is None:
+            provider = provider_registry.discover_from_env(
+                env,
+                priority=[mode] if mode else None,
             )
-            output_format = os.getenv('AIS_HUB_OUTPUT', 'json').strip() or 'json'
-            message_format = os.getenv('AIS_HUB_MESSAGE_FORMAT', '1').strip() or '1'
-            compress = os.getenv('AIS_HUB_COMPRESS', '0').lower() in {'1', 'true', 'yes'}
-            try:
-                return AisHubApiProvider(
-                    username=username.strip(),
-                    api_key=api_key,
-                    output_format=output_format,
-                    message_format=message_format,
-                    compress=compress,
-                    extra_params=extra_params,
-                )
-            except Exception as exc:
-                print(f"Warning: impossibile inizializzare AisHubApiProvider: {exc}")
 
-        open_data_file = os.getenv('AIS_OPEN_DATA_FILE')
-        if open_data_file:
-            try:
-                return OpenAisFileProvider(open_data_file)
-            except Exception as exc:
-                print(f"Warning: impossibile utilizzare AIS_OPEN_DATA_FILE: {exc}")
+        if provider:
+            return provider
 
-        open_data_url = os.getenv('AIS_OPEN_DATA_URL')
-        if open_data_url:
-            headers = cls._parse_env_mapping(os.getenv('AIS_OPEN_DATA_HEADERS'), 'AIS_OPEN_DATA_HEADERS')
-            params = cls._parse_env_mapping(os.getenv('AIS_OPEN_DATA_PARAMS'), 'AIS_OPEN_DATA_PARAMS')
-            port_param = os.getenv('AIS_OPEN_DATA_PORT_PARAM')
-
-            try:
-                return OpenAisApiProvider(
-                    open_data_url,
-                    headers=headers,
-                    params=params,
-                    port_query_param=port_param,
-                )
-            except Exception as exc:
-                print(f"Warning: impossibile utilizzare AIS_OPEN_DATA_URL: {exc}")
+        if mode == 'simulated':
+            return SampleDataProvider()
 
         return None
 
@@ -192,90 +90,53 @@ class MarineTrafficMonitor:
 
         mode = str(config.get('data_mode', '')).lower()
 
-        if mode == 'commercial':
-            api_key = str(config.get('api_key') or '')
-            if api_key:
-                try:
-                    return MarineTrafficApiProvider(api_key)
-                except Exception as exc:
-                    print(
-                        "Warning: impossibile utilizzare la chiave API commerciale: "
-                        f"{exc}"
-                    )
-            return None
-
-        if mode == 'aishub':
-            username = str(config.get('ais_hub_username') or '').strip()
-            if not username:
-                print("Warning: è necessario specificare username per AISHub")
-                return None
-
-            api_key = str(config.get('ais_hub_api_key') or '').strip() or None
-            raw_params = config.get('ais_hub_extra_params') or {}
-            if isinstance(raw_params, dict):
-                extra_params = {str(k): str(v) for k, v in raw_params.items()}
-            else:
-                extra_params = {}
-
-            output_format = str(config.get('ais_hub_output') or 'json').strip() or 'json'
-            message_format = (
-                str(config.get('ais_hub_message_format') or '1').strip() or '1'
-            )
-            compress = bool(config.get('ais_hub_compress', False))
-
-            try:
-                return AisHubApiProvider(
-                    username=username,
-                    api_key=api_key,
-                    output_format=output_format,
-                    message_format=message_format,
-                    compress=compress,
-                    extra_params=extra_params,
-                )
-            except Exception as exc:
-                print(f"Warning: impostazioni AISHub non valide: {exc}")
-            return None
-
-        if mode == 'open_file':
-            file_path = config.get('open_data_file')
-            if file_path:
-                try:
-                    return OpenAisFileProvider(str(file_path))
-                except Exception as exc:
-                    print(f"Warning: file open-data non valido: {exc}")
-            return None
-
-        if mode == 'open_http':
-            endpoint = config.get('open_data_url')
-            if endpoint:
-                raw_headers = config.get('open_data_headers') or {}
-                raw_params = config.get('open_data_params') or {}
-                headers = (
-                    {str(k): str(v) for k, v in raw_headers.items()}
-                    if isinstance(raw_headers, dict)
-                    else {}
-                )
-                params = (
-                    {str(k): str(v) for k, v in raw_params.items()}
-                    if isinstance(raw_params, dict)
-                    else {}
-                )
-                port_param = config.get('open_data_port_param')
-                try:
-                    return OpenAisApiProvider(
-                        str(endpoint),
-                        headers=headers,
-                        params=params,
-                        port_query_param=(str(port_param) if port_param else None),
-                    )
-                except Exception as exc:
-                    print(f"Warning: endpoint open-data non valido: {exc}")
-            return None
-
         if mode == 'simulated':
             return SampleDataProvider()
 
-        return None
+        env_like: Dict[str, str] = {}
+        if mode:
+            env_like['DATA_PROVIDER_MODE'] = mode
+
+        key_map = {
+            'api_key': 'MARINETRAFFIC_API_KEY',
+            'ais_hub_username': 'AIS_HUB_USERNAME',
+            'ais_hub_api_key': 'AIS_HUB_API_KEY',
+            'ais_hub_output': 'AIS_HUB_OUTPUT',
+            'ais_hub_message_format': 'AIS_HUB_MESSAGE_FORMAT',
+            'ais_hub_compress': 'AIS_HUB_COMPRESS',
+            'ais_hub_extra_params': 'AIS_HUB_EXTRA_PARAMS',
+            'open_data_file': 'AIS_OPEN_DATA_FILE',
+            'open_data_url': 'AIS_OPEN_DATA_URL',
+            'open_data_headers': 'AIS_OPEN_DATA_HEADERS',
+            'open_data_params': 'AIS_OPEN_DATA_PARAMS',
+            'open_data_port_param': 'AIS_OPEN_DATA_PORT_PARAM',
+        }
+
+        for key, value in config.items():
+            if key in {'cancelled', 'ports', 'data_mode'}:
+                continue
+            if value is None:
+                continue
+
+            env_key = key_map.get(key, str(key).upper())
+
+            if isinstance(value, dict):
+                env_like[env_key] = json.dumps(value)
+            elif isinstance(value, bool):
+                env_like[env_key] = '1' if value else '0'
+            else:
+                env_like[env_key] = str(value)
+
+        provider: Optional[VesselDataProvider]
+        try:
+            provider = provider_registry.create_from_env(mode, env_like)
+        except KeyError:
+            provider = None
+
+        if provider:
+            return provider
+
+        return provider_registry.discover_from_env(env_like, priority=[mode] if mode else None)
 
     def monitor_port(self, port_name: str) -> Dict:
         """
@@ -501,8 +362,8 @@ def main():
         'yes',
     }
 
-    aishub_extra_params_env = MarineTrafficMonitor._parse_env_mapping(
-        os.getenv('AIS_HUB_EXTRA_PARAMS'), 'AIS_HUB_EXTRA_PARAMS'
+    aishub_extra_params_env = parse_env_mapping(
+        os.getenv('AIS_HUB_EXTRA_PARAMS')
     ) or {}
 
     aishub_defaults = {
@@ -515,16 +376,15 @@ def main():
     }
 
     if use_gui:
-        if isinstance(data_provider, OpenAisFileProvider):
-            default_mode = 'open_file'
-        elif isinstance(data_provider, OpenAisApiProvider):
-            default_mode = 'open_http'
-        elif isinstance(data_provider, AisHubApiProvider):
-            default_mode = 'aishub'
-        elif isinstance(data_provider, SampleDataProvider):
-            default_mode = 'simulated'
-        else:
-            default_mode = 'commercial'
+        provider_name = getattr(data_provider, 'provider_name', '') if data_provider else ''
+        mode_map = {
+            'open_file': 'open_file',
+            'open_http': 'open_http',
+            'aishub': 'aishub',
+            'simulated': 'simulated',
+            'commercial': 'commercial',
+        }
+        default_mode = mode_map.get(provider_name, 'commercial')
 
         try:
             from monitor_gui import launch_configuration_gui
@@ -575,12 +435,19 @@ def main():
 
     if data_provider is None:
         data_source_label = "API MarineTraffic (commerciale) con fallback automatici"
-    elif isinstance(data_provider, AisHubApiProvider):
-        data_source_label = "AISHub API (open-data)"
-    elif isinstance(data_provider, SampleDataProvider):
-        data_source_label = "dati simulati (SampleDataProvider)"
     else:
-        data_source_label = data_provider.__class__.__name__
+        provider_name = getattr(data_provider, 'provider_name', '')
+        provider_labels = {
+            'aishub': 'AISHub API (open-data)',
+            'simulated': 'dati simulati (SampleDataProvider)',
+            'open_file': 'dataset open-data locale',
+            'open_http': 'endpoint open-data HTTP',
+            'commercial': 'API MarineTraffic (commerciale)',
+        }
+        data_source_label = provider_labels.get(
+            provider_name,
+            data_provider.__class__.__name__,
+        )
 
     print(f"\n✓ Fonte dati AIS: {data_source_label}")
 

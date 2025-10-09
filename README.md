@@ -45,8 +45,8 @@ pip install -r requirements.txt
 
 3. **Configurazione**:
 ```bash
-cp .env.example .env
-# Modifica .env con la tua API key di Marine Traffic
+cp .env.template .env
+# Modifica .env con la tua API key o credenziali open-data
 ```
 
 Per utilizzare dati open-source è possibile impostare variabili aggiuntive (vedi sezione dedicata).
@@ -68,7 +68,7 @@ settata.
 
 ### Configurazione Personalizzata
 
-Modifica il file `.env` per personalizzare:
+Modifica il file `.env` basandoti sul template fornito:
 
 ```env
 # Chiave API Marine Traffic (facoltativa con fonti open-data)
@@ -113,6 +113,30 @@ ENABLE_SERIES_PROJECTIONS=false
 # Parametri per l'analisi delle serie temporali (se abilitata)
 PROJECTION_HORIZON_HOURS=48
 PROJECTION_INTERVAL_HOURS=6
+```
+
+#### Esempio configurazione MarineTraffic (commerciale)
+
+```env
+DATA_PROVIDER_MODE=commercial
+MARINETRAFFIC_API_KEY=mt_live_xxxxxxxxxxxx
+```
+
+#### Esempio configurazione AISHub (open-data documentato)
+
+```env
+DATA_PROVIDER_MODE=aishub
+AIS_HUB_USERNAME=your_username
+AIS_HUB_API_KEY=optional_token
+AIS_HUB_OUTPUT=json
+AIS_HUB_MESSAGE_FORMAT=1
+AIS_HUB_COMPRESS=0
+AIS_HUB_EXTRA_PARAMS={
+  "latmin": "40.10",
+  "latmax": "40.90",
+  "lonmin": "13.90",
+  "lonmax": "14.70"
+}
 ```
 
 Le variabili `AIS_OPEN_DATA_*` e `AIS_HUB_*` sono facoltative e permettono di utilizzare fonti alternative gratuite o open-source in sostituzione (o come fallback) dell'API commerciale. In particolare, `AIS_HUB_USERNAME` e `AIS_HUB_API_KEY` consentono di interrogare il feed documentato su [aishub.net/api](https://www.aishub.net/api), mentre i parametri `AIS_HUB_OUTPUT`, `AIS_HUB_MESSAGE_FORMAT` e `AIS_HUB_COMPRESS` replicano le opzioni di formato illustrate dalla documentazione ufficiale. Se il porto non è presente nell'elenco interno (`data_providers.PORT_COORDINATES`) è possibile definire un bounding box personalizzato fornendo i campi `latmin`, `latmax`, `lonmin`, `lonmax` all'interno di `AIS_HUB_EXTRA_PARAMS`.
@@ -184,6 +208,13 @@ NAPLES:
 
 ## 🏗️ Architettura
 
+```mermaid
+flowchart LR
+    Provider[Data Provider] --> Client[MarineTrafficClient]
+    Client --> Cache[(Cache Layer)]
+    Cache --> Analytics[Monitor & Analytics]
+```
+
 Il sistema è composto da 4 moduli principali:
 
 ### 1. `marine_traffic_client.py`
@@ -220,6 +251,32 @@ Applicazione principale:
 Interfaccia grafica Tkinter per scegliere la fonte dati, configurare i porti da
 monitorare e attivare le analisi di proiezione delle serie temporali.
 
+Documentazione aggiuntiva è disponibile in `docs/REFERENCE.md` e
+`docs/architecture.md`.
+
+## 🧩 Schema Dati Nave
+
+```json
+{
+  "mmsi": 247039300,
+  "ship_name": "TEST VESSEL",
+  "ship_type": "Cargo",
+  "destination": "Naples",
+  "eta": "2024-05-01T12:00:00",
+  "speed": 12.5,
+  "course": 90,
+  "latitude": 40.83,
+  "longitude": 14.25,
+  "draught": 8.5,
+  "length": 200,
+  "width": 32,
+  "status": "Under way using engine"
+}
+```
+
+Ogni provider converte i payload nativi in questo schema uniforme tramite la
+funzione `normalize_ais_record`.
+
 ## 📈 Metriche e KPI
 
 Il sistema calcola automaticamente:
@@ -252,6 +309,19 @@ Per contesti in cui non è possibile utilizzare l'API proprietaria di Marine Tra
 
 È possibile combinare queste fonti con dati locali (CSV/JSON/GeoJSON) esportati da portali pubblici nazionali per alimentare il sistema senza costi di licenza.
 
+## ✅ Test & CI
+
+- `pytest` verifica i provider e la catena di fallback
+- `python -m compileall .` garantisce la validità sintattica del codice
+- Il workflow GitHub Actions `.github/workflows/tests.yml` esegue automaticamente entrambi i controlli su push e pull request
+
+## 🌐 Skeleton API FastAPI
+
+La cartella `api/` contiene uno scheletro FastAPI (`server.py`) con le rotte
+`/vessels`, `/ports` e `/stats`. Attualmente restituiscono placeholder e
+documentano le risposte attese: potranno essere collegate al sistema di cache o
+ai provider live in evoluzioni successive.
+
 ## 🛠️ Sviluppo Futuro
 
 Possibili miglioramenti:
@@ -271,6 +341,10 @@ Questo progetto è sviluppato per l'Autorità Portuale del Tirreno Centrale.
 ## 👥 Contributi
 
 Per contribuire al progetto, aprire una issue o una pull request.
+
+## 🙏 Credits
+
+Data provided by AISHub (www.aishub.net).
 
 ## 📧 Contatti
 
