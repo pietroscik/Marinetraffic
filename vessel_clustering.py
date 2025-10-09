@@ -3,9 +3,11 @@ Vessel Clustering
 Modulo per il clustering dei vettori per valutazione dei tempi di operatività
 """
 
-from typing import List, Dict
-import numpy as np
+from collections import defaultdict
 from datetime import datetime
+from typing import Dict, List
+
+import numpy as np
 
 
 class VesselClusterer:
@@ -25,15 +27,13 @@ class VesselClusterer:
         Returns:
             Dizionario con cluster per tipo
         """
-        clusters = {}
-        
+        clusters: Dict[str, List[Dict]] = defaultdict(list)
+
         for vessel in vessels:
             ship_type = vessel.get('ship_type', 'Unknown')
-            if ship_type not in clusters:
-                clusters[ship_type] = []
             clusters[ship_type].append(vessel)
-        
-        return clusters
+
+        return dict(clusters)
     
     def cluster_by_arrival_time(self, vessels: List[Dict], time_window_hours: int = 6) -> Dict[str, List[Dict]]:
         """
@@ -46,28 +46,31 @@ class VesselClusterer:
         Returns:
             Dizionario con cluster per finestra temporale
         """
-        clusters = {}
-        
+        clusters: Dict[str, List[Dict]] = defaultdict(list)
+        now = datetime.now()
+
         for vessel in vessels:
             eta_str = vessel.get('eta')
             if not eta_str:
                 continue
-                
+
             try:
                 eta = datetime.fromisoformat(eta_str)
-                hours_to_arrival = (eta - datetime.now()).total_seconds() / 3600
-                
-                # Determina la finestra temporale
+                hours_to_arrival = (eta - now).total_seconds() / 3600
+
+                if hours_to_arrival < 0:
+                    continue
+
                 window_index = int(hours_to_arrival // time_window_hours)
-                window_key = f"{window_index * time_window_hours}-{(window_index + 1) * time_window_hours}h"
-                
-                if window_key not in clusters:
-                    clusters[window_key] = []
+                window_start = window_index * time_window_hours
+                window_end = (window_index + 1) * time_window_hours
+                window_key = f"{window_start}-{window_end}h"
+
                 clusters[window_key].append(vessel)
-            except:
+            except Exception:
                 continue
-        
-        return clusters
+
+        return dict(clusters)
     
     def cluster_by_size(self, vessels: List[Dict]) -> Dict[str, List[Dict]]:
         """
@@ -161,24 +164,29 @@ class VesselClusterer:
         # Cluster per finestra temporale
         time_clusters = self.cluster_by_arrival_time(vessels, time_window_hours=12)
         
-        # Stima tempi operativi
-        operational_estimates = self.estimate_operational_times(vessels)
-        
         # Analizza ogni finestra temporale
         capacity_analysis = {
             'max_berths': max_berths,
             'time_windows': [],
             'overall_utilization': 0.0,
-            'potential_congestion': False
+            'potential_congestion': False,
+            'utilization_std_dev': 0.0,
+            'peak_utilization': 0.0
         }
         
-        total_utilization = 0
-        windows_count = 0
+        window_utilizations = []
         
-        for window_key, window_vessels in sorted(time_clusters.items()):
+        def sort_key(window_key: str) -> int:
+            try:
+                return int(window_key.split('-')[0])
+            except (ValueError, IndexError):
+                return 0
+
+        for window_key in sorted(time_clusters.keys(), key=sort_key):
+            window_vessels = time_clusters[window_key]
             vessels_count = len(window_vessels)
             utilization = (vessels_count / max_berths) * 100
-            
+
             capacity_analysis['time_windows'].append({
                 'window': window_key,
                 'arriving_vessels': vessels_count,
@@ -187,15 +195,21 @@ class VesselClusterer:
                 'vessel_types': self._count_types(window_vessels)
             })
             
-            total_utilization += utilization
-            windows_count += 1
-        
-        if windows_count > 0:
-            capacity_analysis['overall_utilization'] = round(total_utilization / windows_count, 1)
+            window_utilizations.append(utilization)
+
+        if window_utilizations:
+            mean_utilization = float(np.mean(window_utilizations))
+            capacity_analysis['overall_utilization'] = round(mean_utilization, 1)
+            capacity_analysis['utilization_std_dev'] = round(
+                float(np.std(window_utilizations, ddof=0)), 1
+            )
+            capacity_analysis['peak_utilization'] = round(
+                float(np.max(window_utilizations)), 1
+            )
             capacity_analysis['potential_congestion'] = any(
                 w['is_congested'] for w in capacity_analysis['time_windows']
             )
-        
+
         return capacity_analysis
     
     def _count_types(self, vessels: List[Dict]) -> Dict[str, int]:

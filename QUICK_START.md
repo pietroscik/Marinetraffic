@@ -96,6 +96,20 @@ Per dati reali da Marine Traffic:
 MARINETRAFFIC_API_KEY=your_actual_api_key
 ```
 
+### Fonte dati AISHub (open-source)
+Registrati su [aishub.net/api](https://www.aishub.net/api) e configura `.env`:
+```env
+DATA_PROVIDER_MODE=aishub
+AIS_HUB_USERNAME=your_username
+AIS_HUB_API_KEY=optional_api_key
+AIS_HUB_OUTPUT=json
+AIS_HUB_MESSAGE_FORMAT=1
+AIS_HUB_COMPRESS=0
+# Parametri extra opzionali: bounding box personalizzato
+AIS_HUB_EXTRA_PARAMS={"latmin":"40.2","latmax":"41.4","lonmin":"13.7","lonmax":"14.9"}
+```
+Se il porto desiderato non è preconfigurato, specifica il bounding box manualmente nei parametri extra.
+
 ## Parametri Principali
 
 ### Capacità Porto

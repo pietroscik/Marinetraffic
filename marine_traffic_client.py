@@ -1,98 +1,142 @@
-"""
-Marine Traffic API Client
-Modulo per l'interazione con l'API di Marine Traffic per recuperare dati sui vettori
+"""Client per l'interrogazione di dati AIS.
+
+Il client mantiene la compatibilità con l'API proprietaria di Marine Traffic ma
+introduce provider alternativi (open-data o simulati) per alimentare il sistema
+anche in contesti privi di licenza commerciale.
 """
 
+from __future__ import annotations
+
+from typing import Dict, List, Optional
+from datetime import datetime
+
 import requests
-import time
-from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+
+from data_providers import MarineTrafficApiProvider, SampleDataProvider, VesselDataProvider
+from data_providers.utils import cache_ttl_minutes, load_cached_payload, store_cached_payload
 
 
 class MarineTrafficClient:
-    """Client per l'API di Marine Traffic"""
-    
+    """Client per l'API di Marine Traffic o per fonti alternative"""
+
     BASE_URL = "https://services.marinetraffic.com/api"
-    
-    def __init__(self, api_key: str):
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        data_provider: Optional[VesselDataProvider] = None,
+        session: Optional[requests.Session] = None,
+    ) -> None:
         """
-        Inizializza il client Marine Traffic
-        
+        Inizializza il client Marine Traffic.
+
         Args:
-            api_key: Chiave API di Marine Traffic
+            api_key: Chiave API di Marine Traffic (può rimanere fittizia per le
+                fonti open-data).
+            data_provider: Provider alternativo per il recupero dei dati.
+            session: Sessione HTTP riutilizzabile.
         """
         self.api_key = api_key
-        self.session = requests.Session()
-        
+        self.session = session or requests.Session()
+        self.data_provider = data_provider
+        self._fallback_provider = SampleDataProvider()
+        self._api_provider = None
+
+        if data_provider is None or not isinstance(data_provider, MarineTrafficApiProvider):
+            try:
+                self._api_provider = MarineTrafficApiProvider(
+                    api_key,
+                    session=self.session,
+                )
+            except ValueError:
+                self._api_provider = None
+        else:
+            self._api_provider = data_provider
+
     def get_vessels_in_port_area(self, port_name: str, radius: int = 50) -> List[Dict]:
         """
-        Recupera i vettori nell'area di un porto
-        
+        Recupera i vettori nell'area di un porto.
+
+        I risultati vengono memorizzati in cache per ridurre le chiamate ripetute
+        verso lo stesso provider; in caso di errore vengono riutilizzati gli ultimi
+        dati validi disponibili prima di ricorrere al provider simulato.
+
         Args:
             port_name: Nome del porto
             radius: Raggio di ricerca in km
-            
+
         Returns:
             Lista di vettori attivi nell'area
         """
-        # Coordinati dei principali porti del Tirreno Centrale
-        port_coordinates = {
-            'Naples': {'lat': 40.8394, 'lon': 14.2520},
-            'Salerno': {'lat': 40.6741, 'lon': 14.7697},
-            'Civitavecchia': {'lat': 42.0942, 'lon': 11.7961},
-            'Gaeta': {'lat': 41.2131, 'lon': 13.5722},
-        }
-        
-        if port_name not in port_coordinates:
-            print(f"Warning: Coordinate non trovate per {port_name}, usando dati simulati")
-            return self._generate_sample_vessels(port_name)
-        
-        coords = port_coordinates[port_name]
-        
-        # In un'implementazione reale, qui si farebbe la chiamata all'API
-        # Per ora generiamo dati di esempio
-        return self._generate_sample_vessels(port_name)
-    
-    def _generate_sample_vessels(self, port_name: str) -> List[Dict]:
-        """
-        Genera dati di esempio per i vettori
-        Questo metodo simula la risposta dell'API per scopi dimostrativi
-        """
-        import random
-        
-        vessel_types = ['Cargo', 'Tanker', 'Container Ship', 'Bulk Carrier', 'Passenger Ship']
-        vessel_names = ['MEDITERRANEAN STAR', 'OCEAN VOYAGER', 'TYRRHENIAN EXPRESS', 
-                       'ATLANTIC HORIZON', 'NEPTUNE CARRIER', 'POSEIDON TRADER',
-                       'ADRIATIC QUEEN', 'ITALIA MARINE', 'BLUE WAVE', 'SEA SPIRIT']
-        
-        vessels = []
-        num_vessels = random.randint(3, 8)
-        
-        for i in range(num_vessels):
-            eta_hours = random.randint(1, 48)
-            vessels.append({
-                'mmsi': 200000000 + random.randint(1000, 9999) * 100 + i,
-                'imo': 9000000 + random.randint(100000, 999999),
-                'ship_name': random.choice(vessel_names),
-                'ship_type': random.choice(vessel_types),
-                'destination': port_name,
-                'eta': (datetime.now() + timedelta(hours=eta_hours)).isoformat(),
-                'speed': round(random.uniform(8.0, 18.0), 1),
-                'course': random.randint(0, 360),
-                'latitude': 40.5 + random.uniform(-1, 1),
-                'longitude': 14.0 + random.uniform(-1, 1),
-                'draught': round(random.uniform(6.0, 14.0), 1),
-                'length': random.randint(100, 350),
-                'width': random.randint(20, 50),
-                'status': random.choice(['Under way using engine', 'At anchor', 'Moored'])
-            })
-        
-        return vessels
+        providers_chain: List[VesselDataProvider] = []
+
+        if self.data_provider is not None:
+            providers_chain.append(self.data_provider)
+        elif self._api_provider is not None:
+            providers_chain.append(self._api_provider)
+
+        if self._api_provider is not None and self._api_provider not in providers_chain:
+            providers_chain.append(self._api_provider)
+
+        last_error: Optional[Exception] = None
+        attempted_providers: List[str] = []
+        ttl_minutes = cache_ttl_minutes()
+
+        for provider in providers_chain:
+            provider_name = getattr(provider, "provider_name", provider.__class__.__name__).lower()
+            attempted_providers.append(provider_name)
+
+            if provider_name != "simulated":
+                cached = load_cached_payload(
+                    provider_name,
+                    port_name,
+                    radius,
+                    max_age_minutes=ttl_minutes,
+                )
+                if cached:
+                    return cached.get("vessels", [])
+
+            try:
+                vessels = provider.fetch_vessels(port_name, radius)
+                if provider_name != "simulated":
+                    store_cached_payload(provider_name, port_name, radius, vessels)
+                return vessels
+            except Exception as exc:
+                last_error = exc
+                print(
+                    "Warning: impossibile recuperare i dati da "
+                    f"{provider.__class__.__name__}: {exc}"
+                )
+
+        if last_error:
+            for provider_name in attempted_providers:
+                if provider_name == "simulated":
+                    continue
+                cached = load_cached_payload(
+                    provider_name,
+                    port_name,
+                    radius,
+                    max_age_minutes=None,
+                )
+                if cached:
+                    print(
+                        "Info: utilizzo dati memorizzati in cache per "
+                        f"{provider_name}"
+                    )
+                    return cached.get("vessels", [])
+
+            print("Info: utilizzo dati simulati come fallback")
+
+        try:
+            return self._fallback_provider.fetch_vessels(port_name, radius)
+        except Exception:
+            return []
     
     def get_vessel_details(self, mmsi: int) -> Optional[Dict]:
         """
         Recupera i dettagli di un vettore specifico
-        
+
         Args:
             mmsi: Maritime Mobile Service Identity del vettore
             
@@ -106,19 +150,23 @@ class MarineTrafficClient:
             'status': 'active'
         }
     
-    def get_port_traffic_statistics(self, port_name: str, days: int = 7) -> Dict:
+    def get_port_traffic_statistics(
+        self, port_name: str, days: int = 7, *, vessels: Optional[List[Dict]] = None
+    ) -> Dict:
         """
         Calcola statistiche sul traffico portuale
-        
+
         Args:
             port_name: Nome del porto
             days: Numero di giorni per le statistiche
-            
+            vessels: Lista di vettori già recuperata (per evitare chiamate ripetute)
+
         Returns:
             Statistiche sul traffico
         """
-        vessels = self.get_vessels_in_port_area(port_name)
-        
+        if vessels is None:
+            vessels = self.get_vessels_in_port_area(port_name)
+
         return {
             'port': port_name,
             'current_vessels': len(vessels),
@@ -139,16 +187,17 @@ class MarineTrafficClient:
         """Calcola l'ETA medio in ore"""
         if not vessels:
             return 0.0
-        
+
         total_hours = 0
         count = 0
-        
+        now = datetime.now()
+
         for vessel in vessels:
             eta_str = vessel.get('eta')
             if eta_str:
                 try:
                     eta = datetime.fromisoformat(eta_str)
-                    hours_to_arrival = (eta - datetime.now()).total_seconds() / 3600
+                    hours_to_arrival = (eta - now).total_seconds() / 3600
                     if hours_to_arrival > 0:
                         total_hours += hours_to_arrival
                         count += 1
