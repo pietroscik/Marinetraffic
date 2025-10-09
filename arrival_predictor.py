@@ -4,7 +4,7 @@ Modulo per la predizione in tempo reale degli arrivi dei vettori
 """
 
 from datetime import datetime, timedelta
-from typing import List, Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 
@@ -15,7 +15,9 @@ class ArrivalPredictor:
         """Inizializza il predittore"""
         self.historical_data = []
         
-    def predict_arrival_time(self, vessel: Dict) -> Tuple[datetime, float]:
+    def predict_arrival_time(
+        self, vessel: Dict, *, reference_time: Optional[datetime] = None
+    ) -> Tuple[datetime, float]:
         """
         Predice il tempo di arrivo di un vettore
         
@@ -26,14 +28,16 @@ class ArrivalPredictor:
             Tupla (tempo arrivo stimato, confidenza della predizione)
         """
         # Estrai ETA dichiarato
+        now = reference_time or datetime.now()
+
         eta_declared = vessel.get('eta')
         if eta_declared:
             try:
                 eta_dt = datetime.fromisoformat(eta_declared)
             except:
-                eta_dt = datetime.now() + timedelta(hours=24)
+                eta_dt = now + timedelta(hours=24)
         else:
-            eta_dt = datetime.now() + timedelta(hours=24)
+            eta_dt = now + timedelta(hours=24)
         
         # Fattori di correzione basati su velocità e condizioni
         speed = vessel.get('speed', 12.0)
@@ -60,10 +64,10 @@ class ArrivalPredictor:
             confidence += 0.05
         
         # Applica correzione
-        hours_to_arrival = (eta_dt - datetime.now()).total_seconds() / 3600
+        hours_to_arrival = (eta_dt - now).total_seconds() / 3600
         adjusted_hours = hours_to_arrival * correction_factor
-        
-        predicted_arrival = datetime.now() + timedelta(hours=max(0, adjusted_hours))
+
+        predicted_arrival = now + timedelta(hours=max(0, adjusted_hours))
         
         return predicted_arrival, min(max(confidence, 0.0), 1.0)
     
@@ -79,17 +83,24 @@ class ArrivalPredictor:
         """
         predictions = []
         
+        now = datetime.now()
+
         for vessel in vessels:
-            predicted_time, confidence = self.predict_arrival_time(vessel)
-            
+            predicted_time, confidence = self.predict_arrival_time(
+                vessel, reference_time=now
+            )
+
             predictions.append({
                 'vessel_name': vessel.get('ship_name', 'Unknown'),
                 'mmsi': vessel.get('mmsi'),
                 'ship_type': vessel.get('ship_type', 'Unknown'),
                 'declared_eta': vessel.get('eta'),
                 'predicted_eta': predicted_time.isoformat(),
+                'predicted_eta_epoch': predicted_time.timestamp(),
                 'confidence': round(confidence, 2),
-                'hours_to_arrival': round((predicted_time - datetime.now()).total_seconds() / 3600, 1),
+                'hours_to_arrival': round(
+                    (predicted_time - now).total_seconds() / 3600, 1
+                ),
                 'current_speed': vessel.get('speed', 0),
                 'status': vessel.get('status', 'Unknown')
             })
@@ -114,7 +125,10 @@ class ArrivalPredictor:
         
         for pred in predictions:
             try:
-                arrival_time = datetime.fromisoformat(pred['predicted_eta'])
+                if pred.get('predicted_eta_epoch'):
+                    arrival_time = datetime.fromtimestamp(pred['predicted_eta_epoch'])
+                else:
+                    arrival_time = datetime.fromisoformat(pred['predicted_eta'])
                 window_start = arrival_time.replace(minute=0, second=0, microsecond=0)
                 window_start -= timedelta(hours=window_start.hour % window_hours)
                 
@@ -154,5 +168,88 @@ class ArrivalPredictor:
         for pred in predictions:
             if pred['hours_to_arrival'] <= hours_threshold and pred['hours_to_arrival'] >= 0:
                 priority_arrivals.append(pred)
-        
+
         return priority_arrivals
+
+    def generate_time_series_projection(
+        self,
+        predictions: List[Dict],
+        *,
+        horizon_hours: int = 48,
+        interval_hours: int = 6,
+    ) -> Dict:
+        """Genera una proiezione aggregata degli arrivi futuri."""
+
+        if horizon_hours <= 0 or interval_hours <= 0:
+            raise ValueError(
+                "I parametri horizon_hours e interval_hours devono essere positivi"
+            )
+
+        now = datetime.now()
+        bucket_count = max(1, int(np.ceil(horizon_hours / interval_hours)))
+
+        arrivals: List[datetime] = []
+        for pred in predictions:
+            eta_value = pred.get('predicted_eta') or pred.get('declared_eta')
+            if not eta_value:
+                continue
+            try:
+                eta_dt = datetime.fromisoformat(eta_value)
+            except Exception:
+                continue
+
+            if eta_dt < now:
+                continue
+
+            arrivals.append(eta_dt)
+
+        arrivals.sort()
+
+        buckets: List[Dict] = []
+        cumulative = 0
+
+        for index in range(bucket_count):
+            window_start = now + timedelta(hours=index * interval_hours)
+            window_end = window_start + timedelta(hours=interval_hours)
+            count = sum(1 for eta in arrivals if window_start <= eta < window_end)
+            cumulative += count
+
+            buckets.append(
+                {
+                    'window_start': window_start.isoformat(),
+                    'window_end': window_end.isoformat(),
+                    'expected_arrivals': count,
+                    'cumulative_expected': cumulative,
+                }
+            )
+
+        counts = np.array([bucket['expected_arrivals'] for bucket in buckets], dtype=float)
+
+        trendline = None
+        if len(counts) >= 2 and counts.any():
+            x = np.arange(len(counts))
+            slope, intercept = np.polyfit(x, counts, 1)
+            trend_values = intercept + slope * x
+
+            for idx, estimate in enumerate(trend_values):
+                buckets[idx]['trend_estimate'] = max(float(estimate), 0.0)
+
+            trendline = {
+                'slope': float(slope),
+                'intercept': float(intercept),
+                'description': (
+                    "Trend crescente"
+                    if slope > 0
+                    else "Trend decrescente"
+                    if slope < 0
+                    else "Trend stabile"
+                ),
+            }
+
+        return {
+            'generated_at': now.isoformat(),
+            'horizon_hours': horizon_hours,
+            'interval_hours': interval_hours,
+            'buckets': buckets,
+            'trendline': trendline,
+        }

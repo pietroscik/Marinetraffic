@@ -31,10 +31,11 @@ FILES CREATED
 
 Core Modules (886 lines of Python):
   1. marine_traffic_client.py     (158 lines) - API client and data retrieval
-  2. arrival_predictor.py         (158 lines) - Real-time arrival predictions
+  2. arrival_predictor.py         (158 lines) - Real-time arrival predictions & projections
   3. vessel_clustering.py         (226 lines) - Operational clustering
-  4. marine_traffic_monitor.py    (204 lines) - Main orchestration
-  5. examples.py                  (140 lines) - Usage demonstrations
+  4. marine_traffic_monitor.py    (204 lines) - Main orchestration & reporting
+  5. monitor_gui.py               (200 lines) - GUI configurator for data sources
+  6. examples.py                  (140 lines) - Usage demonstrations
 
 Configuration & Documentation (584 lines):
   6. requirements.txt             (7 lines)   - Python dependencies
@@ -57,12 +58,14 @@ Real-Time Predictions:
   - Status-based adjustments (anchored, moored, underway)
   - Confidence scoring (0.70-0.90 typical range)
   - Arrival time windows for operational planning
+  - Time-series projections with trend estimation
 
 Clustering & Analytics:
   - By vessel type (Cargo, Tanker, Container, Bulk, Passenger)
   - By size (Small <150m, Medium 150-250m, Large >250m)
   - By arrival time windows (configurable intervals)
   - Operational time estimates per vessel type
+  - Aggregated projections for port load forecasting
 
 Port Capacity Analysis:
   - Utilization percentage calculation
@@ -89,14 +92,16 @@ Architecture:
   - API client abstraction layer
   - Prediction engine with confidence scoring
   - Multi-dimensional clustering system
+  - GUI-driven configuration workflow
   - JSON-based reporting
 
 Data Flow:
-  1. Client retrieves vessel data from Marine Traffic API
-  2. Predictor calculates adjusted ETAs with confidence
-  3. Clusterer groups vessels for operational analysis
-  4. Monitor orchestrates all modules and generates reports
-  5. JSON output saved with timestamp
+  1. Optional GUI sets provider mode (commercial, AISHub, open-data, simulated)
+  2. Client retrieves vessel data from Marine Traffic API
+  3. Predictor calculates adjusted ETAs with confidence
+  4. Clusterer groups vessels for operational analysis
+  5. Monitor orchestrates all modules and generates reports
+  6. JSON output saved with timestamp
 
 ===============================================================================
 OUTPUT FORMAT
@@ -138,7 +143,17 @@ CONFIGURATION
 Environment Variables (.env):
   - MARINETRAFFIC_API_KEY: API authentication
   - TARGET_PORTS: Comma-separated port list
+  - DATA_PROVIDER_MODE: Force provider selection (commercial/aishub/open_file/open_http/simulated)
   - UPDATE_INTERVAL: Refresh rate in seconds
+  - AIS_OPEN_DATA_FILE / AIS_OPEN_DATA_URL: Fonti open-data alternative (CSV/JSON/HTTP)
+  - AIS_OPEN_DATA_PARAMS / AIS_OPEN_DATA_HEADERS: Parametri e header aggiuntivi (JSON)
+  - AIS_OPEN_DATA_PORT_PARAM: Nome parametro query per filtrare per porto
+  - AIS_HUB_USERNAME / AIS_HUB_API_KEY: Credenziali per il feed AISHub
+  - AIS_HUB_OUTPUT / AIS_HUB_MESSAGE_FORMAT / AIS_HUB_COMPRESS: Impostazioni di formato
+  - AIS_HUB_EXTRA_PARAMS: Parametri aggiuntivi (bounding box personalizzati, ecc.)
+  - ENABLE_SERIES_PROJECTIONS: Toggle time-series analysis
+  - PROJECTION_HORIZON_HOURS / PROJECTION_INTERVAL_HOURS: Projection parameters
+  - MARINETRAFFIC_NO_GUI: Disable GUI for headless environments
 
 Port Coordinates:
   - Naples: 40.8394°N, 14.2520°E
