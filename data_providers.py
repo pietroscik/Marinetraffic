@@ -460,8 +460,29 @@ class AisHubApiProvider(VesselDataProvider):
             raise ValueError("Risposta non valida dal servizio AISHub") from exc
 
         if isinstance(payload, dict):
-            if any(key in payload for key in ("ERROR", "error", "status")) and not payload.get("data"):
-                raise ValueError(f"Errore dall'API AISHub: {payload}")
+            record_keys = ("data", "ais", "rows")
+            has_record_container = any(key in payload for key in record_keys)
+
+            error_message = payload.get("ERROR") or payload.get("error")
+            if error_message:
+                raise ValueError(f"Errore dall'API AISHub: {error_message}")
+
+            status_value = payload.get("status")
+            if status_value is not None and not has_record_container:
+                status_tokens: List[str] = []
+                if isinstance(status_value, dict):
+                    status_tokens.extend(
+                        str(value) for key, value in status_value.items() if value is not None
+                    )
+                else:
+                    status_tokens.append(str(status_value))
+
+                normalized_tokens = {
+                    token.strip().lower() for token in status_tokens if token.strip()
+                }
+
+                if not normalized_tokens.intersection({"ok", "success", "0"}):
+                    raise ValueError(f"Errore dall'API AISHub: {payload}")
 
             if "data" in payload and isinstance(payload["data"], list):
                 records = [r for r in payload["data"] if isinstance(r, dict)]

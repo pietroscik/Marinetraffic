@@ -78,15 +78,11 @@ class MarineTrafficClient:
         if self._api_provider is not None and self._api_provider not in providers_chain:
             providers_chain.append(self._api_provider)
 
-        providers_chain.append(self._fallback_provider)
-
         last_error: Optional[Exception] = None
 
         for provider in providers_chain:
             try:
-                vessels = provider.fetch_vessels(port_name, radius)
-                if vessels:
-                    return vessels
+                return provider.fetch_vessels(port_name, radius)
             except Exception as exc:
                 last_error = exc
                 print(
@@ -94,7 +90,7 @@ class MarineTrafficClient:
                     f"{provider.__class__.__name__}: {exc}"
                 )
 
-        if last_error and providers_chain[-1] is self._fallback_provider:
+        if last_error:
             print("Info: utilizzo dati simulati come fallback")
 
         try:

@@ -7,6 +7,8 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Dict, List
 
+import numpy as np
+
 
 class VesselClusterer:
     """Clustering dei vettori per analisi operativa"""
@@ -167,11 +169,12 @@ class VesselClusterer:
             'max_berths': max_berths,
             'time_windows': [],
             'overall_utilization': 0.0,
-            'potential_congestion': False
+            'potential_congestion': False,
+            'utilization_std_dev': 0.0,
+            'peak_utilization': 0.0
         }
         
-        total_utilization = 0
-        windows_count = 0
+        window_utilizations = []
         
         def sort_key(window_key: str) -> int:
             try:
@@ -192,15 +195,21 @@ class VesselClusterer:
                 'vessel_types': self._count_types(window_vessels)
             })
             
-            total_utilization += utilization
-            windows_count += 1
-        
-        if windows_count > 0:
-            capacity_analysis['overall_utilization'] = round(total_utilization / windows_count, 1)
+            window_utilizations.append(utilization)
+
+        if window_utilizations:
+            mean_utilization = float(np.mean(window_utilizations))
+            capacity_analysis['overall_utilization'] = round(mean_utilization, 1)
+            capacity_analysis['utilization_std_dev'] = round(
+                float(np.std(window_utilizations, ddof=0)), 1
+            )
+            capacity_analysis['peak_utilization'] = round(
+                float(np.max(window_utilizations)), 1
+            )
             capacity_analysis['potential_congestion'] = any(
                 w['is_congested'] for w in capacity_analysis['time_windows']
             )
-        
+
         return capacity_analysis
     
     def _count_types(self, vessels: List[Dict]) -> Dict[str, int]:
