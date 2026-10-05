@@ -1,5 +1,7 @@
 # Marine Traffic - Sistema di Monitoraggio Real-Time
 
+> 🚧 **Stato**: Work in Progress — monitoraggio del traffico marittimo con predittore arrivi; verso dashboard operativa.
+
 Sistema avanzato di monitoraggio del traffico marittimo in tempo reale, con predizione degli arrivi e clustering operativo dei vettori. L'obiettivo del progetto è fornire una chiara visione dell'affluenza dei porti italiani con particolare attenzione all'Autorità Portuale del Tirreno Centrale.
 
 ## 🎯 Funzionalità Principali
@@ -59,7 +61,8 @@ Per utilizzare dati open-source è possibile impostare variabili aggiuntive (ved
 python marine_traffic_monitor.py
 ```
 
-All'avvio viene proposta un'interfaccia grafica (Tkinter) per scegliere la fonte
+All'avvio viene proposta un'interfacci
+a grafica (Tkinter) per scegliere la fonte
 dati da utilizzare (API MarineTraffic, dataset open-source locale/HTTP o dati
 simulati) e, opzionalmente, abilitare le proiezioni sulle serie temporali degli
 arrivi. In ambienti server/headless è possibile disabilitare la GUI impostando
@@ -124,7 +127,8 @@ MARINETRAFFIC_API_KEY=mt_live_xxxxxxxxxxxx
 
 #### Esempio configurazione AISHub (open-data documentato)
 
-```env
+``
+`env
 DATA_PROVIDER_MODE=aishub
 AIS_HUB_USERNAME=your_username
 AIS_HUB_API_KEY=optional_token
@@ -171,7 +175,8 @@ MONITORAGGIO PORTO: Naples
 [1/5] Recupero vettori attivi nell'area di Naples...
 ✓ Trovati 6 vettori attivi
 
-[2/5] Calcolo predizioni di arrivo in tempo reale...
+[2/5] Calcolo predizion
+i di arrivo in tempo reale...
 ✓ Generate 6 predizioni
 ✓ Identificati 3 arrivi prioritari (prossime 12 ore)
 
@@ -240,7 +245,8 @@ Sistema di clustering operativo:
 - Stima tempi operativi
 - Analisi capacità portuale
 
-### 4. `marine_traffic_monitor.py`
+### 4. `m
+arine_traffic_monitor.py`
 Applicazione principale:
 - Orchestrazione dei moduli
 - Generazione report
@@ -303,7 +309,8 @@ Per utilizzare il sistema con dati reali, è necessaria una API key di Marine Tr
 Per contesti in cui non è possibile utilizzare l'API proprietaria di Marine Traffic, il progetto supporta fonti alternative configurabili tramite le variabili `AIS_OPEN_DATA_*` e `AIS_HUB_*`. Alcuni esempi di dataset e servizi open-data:
 
 - **AISHub** – Feed JSON documentato su [aishub.net/api](https://www.aishub.net/api); richiede registrazione gratuita e consente bounding box personalizzati tramite parametri `latmin/latmax/lonmin/lonmax`.
-- **Traficom Digitraffic (Finlandia)** – Endpoint pubblico `https://meri.digitraffic.fi/api/ais/v1/locations/latest/` con dati AIS in tempo quasi reale (licenza CC BY 4.0).
+- **T
+raficom Digitraffic (Finlandia)** – Endpoint pubblico `https://meri.digitraffic.fi/api/ais/v1/locations/latest/` con dati AIS in tempo quasi reale (licenza CC BY 4.0).
 - **NOAA Marine Cadastre (USA)** – Dataset storici AIS scaricabili gratuitamente in formato CSV/GeoJSON da [marinecadastre.gov](https://marinecadastre.gov/ais/).
 - **European Marine Observation and Data Network (EMODnet)** – Strumenti e servizi per l'accesso a layer AIS aggregati europei.
 
